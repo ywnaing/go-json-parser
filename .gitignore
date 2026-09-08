@@ -1,0 +1,15 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# Test binaries and coverage
+*.test
+*.out
+
+# OS generated files
+.DS_Store
+._*
