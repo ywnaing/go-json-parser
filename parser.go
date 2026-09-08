@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 type ValueType int
@@ -47,6 +48,71 @@ type Value struct {
 	Num  float64
 	Arr  []Value
 	Obj  []Member
+}
+
+func (val Value) GetString() (string, bool) {
+	if val.Type != TypeString {
+		return "", false
+	}
+
+	return val.Str, true
+}
+
+func (val Value) GetFloat() (float64, bool) {
+	if val.Type != TypeNumber {
+		return 0.0, false
+	}
+
+	return val.Num, true
+}
+
+func (val Value) GetInt() (int, bool) {
+
+	if val.Type != TypeNumber {
+		return 0, false
+	}
+
+	return int(val.Num), true
+}
+
+func (val Value) GetBool() (bool, bool) {
+
+	if val.Type != TypeBool {
+		return false, false
+	}
+
+	return val.Bol, true
+}
+
+func (val Value) IsNull() bool {
+	return val.Type == TypeNull
+}
+
+func (val Value) Get(key string) (Value, bool) {
+	if val.Type != TypeObject {
+		return Value{}, false
+	}
+
+	for i := 0; i < len(val.Obj); i++ {
+		if val.Obj[i].Key == key {
+			return val.Obj[i].Val, true
+		}
+	}
+
+	return Value{}, false
+}
+
+func (val Value) Index(index int) (Value, bool) {
+
+	if val.Type != TypeArray {
+		return Value{}, false
+	}
+
+	if index < 0 || index >= len(val.Arr) {
+		return Value{}, false
+	}
+
+	return val.Arr[index], true
 }
 
 type Parser struct {
@@ -123,9 +189,14 @@ func (p *Parser) parseValue() (Value, error) {
 		}, nil
 	case TOKEN_STRING:
 		currentToken := p.advance()
+
+		unescapeStr, err := unescapeString(currentToken.Val(p.source))
+		if err != nil {
+			return Value{}, err
+		}
 		return Value{
 			Type: TypeString,
-			Str:  currentToken.Val(p.source),
+			Str:  unescapeStr,
 		}, nil
 	case TOKEN_NUMBER:
 		currentToken := p.advance()
@@ -164,8 +235,11 @@ func (p *Parser) parseObject() (Value, error) {
 			return Value{}, err
 		}
 
-		key := current.Val(p.source)
+		key, err := unescapeString(current.Val(p.source))
 
+		if err != nil {
+			return Value{}, err
+		}
 		// Expect ':'
 		if _, err := p.expect(TOKEN_COLON); err != nil {
 			return Value{}, err
@@ -233,4 +307,68 @@ func (p *Parser) parseArray() (Value, error) {
 	}
 
 	return Value{}, fmt.Errorf("unexpected end of file inside array")
+}
+
+func unescapeString(raw string) (string, error) {
+
+	var sb strings.Builder
+
+	if len(raw) >= 2 && (raw[0] == '"' && raw[len(raw)-1] == '"') {
+		raw = raw[1 : len(raw)-1]
+	}
+
+	for i := 0; i < len(raw); i++ {
+
+		curr_char := raw[i]
+
+		if curr_char == '\\' {
+			i++
+
+			if i >= len(raw) {
+				return "", fmt.Errorf("unexpected end of string after '\\'")
+			}
+
+			switch raw[i] {
+			case 'n':
+				sb.WriteByte('\n')
+			case 't':
+				sb.WriteByte('\t')
+			case 'r':
+				sb.WriteByte('\r')
+			case 'b':
+				sb.WriteByte('\b')
+			case 'f':
+				sb.WriteByte('\f')
+			case '/':
+				sb.WriteByte('/')
+			case '\\':
+				sb.WriteByte('\\')
+			case '"':
+				sb.WriteByte('"')
+			case 'u':
+				{
+					if i+5 > len(raw) {
+						return "", fmt.Errorf("invalid unicode character!")
+					}
+					hexDegit := raw[i+1 : i+5]
+					hexInt, err := strconv.ParseInt(hexDegit, 16, 16)
+
+					if err != nil {
+						return "", err
+					}
+
+					sb.WriteRune(rune(hexInt))
+					i += 4
+				}
+
+			default:
+				return "", fmt.Errorf("invalid escape character: \\%c", raw[i])
+			}
+		} else {
+			sb.WriteByte(curr_char)
+		}
+
+	}
+
+	return sb.String(), nil
 }
