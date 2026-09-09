@@ -50,44 +50,44 @@ type Value struct {
 	Obj  []Member
 }
 
+// GetString extracts the string value if Type == TypeString.
 func (val Value) GetString() (string, bool) {
 	if val.Type != TypeString {
 		return "", false
 	}
-
 	return val.Str, true
 }
 
+// GetFloat extracts the float64 number if Type == TypeNumber.
 func (val Value) GetFloat() (float64, bool) {
 	if val.Type != TypeNumber {
 		return 0.0, false
 	}
-
 	return val.Num, true
 }
 
+// GetInt extracts the integer representation if Type == TypeNumber.
 func (val Value) GetInt() (int, bool) {
-
 	if val.Type != TypeNumber {
 		return 0, false
 	}
-
 	return int(val.Num), true
 }
 
+// GetBool extracts the boolean value if Type == TypeBool.
 func (val Value) GetBool() (bool, bool) {
-
 	if val.Type != TypeBool {
 		return false, false
 	}
-
 	return val.Bol, true
 }
 
+// IsNull returns true if Type == TypeNull.
 func (val Value) IsNull() bool {
 	return val.Type == TypeNull
 }
 
+// Get finds a member by key in a JSON object.
 func (val Value) Get(key string) (Value, bool) {
 	if val.Type != TypeObject {
 		return Value{}, false
@@ -102,8 +102,8 @@ func (val Value) Get(key string) (Value, bool) {
 	return Value{}, false
 }
 
+// Index retrieves the element at the specified index in a JSON array.
 func (val Value) Index(index int) (Value, bool) {
-
 	if val.Type != TypeArray {
 		return Value{}, false
 	}
@@ -113,6 +113,55 @@ func (val Value) Index(index int) (Value, bool) {
 	}
 
 	return val.Arr[index], true
+}
+
+// String returns the minified compact JSON representation of the Value.
+func (val Value) String() string {
+	var sb strings.Builder
+	formatValue(val, &sb, "", 0, false)
+	return sb.String()
+}
+
+// PrettyPrint returns a formatted multi-line JSON string with the specified indentation (e.g. "  ").
+func (val Value) PrettyPrint(indent string) string {
+	var sb strings.Builder
+	formatValue(val, &sb, indent, 0, false)
+	return sb.String()
+}
+
+// ColorPrint returns a formatted JSON string with ANSI terminal color highlighting.
+func (val Value) ColorPrint(indent string) string {
+	var sb strings.Builder
+	formatValue(val, &sb, indent, 0, true)
+	return sb.String()
+}
+
+// ToNative converts the Value AST into native Go standard types (map[string]any, []any, float64, etc.).
+func (val Value) ToNative() any {
+	switch val.Type {
+	case TypeNull:
+		return nil
+	case TypeBool:
+		return val.Bol
+	case TypeNumber:
+		return val.Num
+	case TypeString:
+		return val.Str
+	case TypeArray:
+		result := make([]any, len(val.Arr))
+		for i, item := range val.Arr {
+			result[i] = item.ToNative()
+		}
+		return result
+	case TypeObject:
+		result := make(map[string]any, len(val.Obj))
+		for _, member := range val.Obj {
+			result[member.Key] = member.Val.ToNative()
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 type Parser struct {
@@ -236,10 +285,10 @@ func (p *Parser) parseObject() (Value, error) {
 		}
 
 		key, err := unescapeString(current.Val(p.source))
-
 		if err != nil {
 			return Value{}, err
 		}
+
 		// Expect ':'
 		if _, err := p.expect(TOKEN_COLON); err != nil {
 			return Value{}, err
@@ -309,19 +358,19 @@ func (p *Parser) parseArray() (Value, error) {
 	return Value{}, fmt.Errorf("unexpected end of file inside array")
 }
 
+// unescapeString decodes a quoted JSON string literal into raw Go string content.
 func unescapeString(raw string) (string, error) {
-
 	var sb strings.Builder
 
+	// Strip surrounding double quotes if present
 	if len(raw) >= 2 && (raw[0] == '"' && raw[len(raw)-1] == '"') {
 		raw = raw[1 : len(raw)-1]
 	}
 
 	for i := 0; i < len(raw); i++ {
+		currChar := raw[i]
 
-		curr_char := raw[i]
-
-		if curr_char == '\\' {
+		if currChar == '\\' {
 			i++
 
 			if i >= len(raw) {
@@ -346,29 +395,264 @@ func unescapeString(raw string) (string, error) {
 			case '"':
 				sb.WriteByte('"')
 			case 'u':
-				{
-					if i+5 > len(raw) {
-						return "", fmt.Errorf("invalid unicode character!")
-					}
-					hexDegit := raw[i+1 : i+5]
-					hexInt, err := strconv.ParseInt(hexDegit, 16, 16)
-
-					if err != nil {
-						return "", err
-					}
-
-					sb.WriteRune(rune(hexInt))
-					i += 4
+				if i+5 > len(raw) {
+					return "", fmt.Errorf("invalid unicode character!")
 				}
+				hexDigit := raw[i+1 : i+5]
+				hexInt, err := strconv.ParseInt(hexDigit, 16, 16)
+				if err != nil {
+					return "", err
+				}
+
+				sb.WriteRune(rune(hexInt))
+				i += 4
 
 			default:
 				return "", fmt.Errorf("invalid escape character: \\%c", raw[i])
 			}
 		} else {
-			sb.WriteByte(curr_char)
+			sb.WriteByte(currChar)
 		}
-
 	}
 
 	return sb.String(), nil
+}
+
+// escapeString encodes a raw Go string into a quoted JSON string with proper escapes.
+func escapeString(s string) string {
+	var sb strings.Builder
+	sb.WriteByte('"')
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+
+		// Handle control characters (< 0x20) and standard escapes
+		if c < 0x20 {
+			switch c {
+			case '\n':
+				sb.WriteString(`\n`)
+			case '\t':
+				sb.WriteString(`\t`)
+			case '\r':
+				sb.WriteString(`\r`)
+			case '\b':
+				sb.WriteString(`\b`)
+			case '\f':
+				sb.WriteString(`\f`)
+			default:
+				fmt.Fprintf(&sb, "\\u%04x", c)
+			}
+		} else {
+			switch c {
+			case '"':
+				sb.WriteString(`\"`)
+			case '\\':
+				sb.WriteString(`\\`)
+			default:
+				sb.WriteByte(c)
+			}
+		}
+	}
+
+	sb.WriteByte('"')
+	return sb.String()
+}
+
+// ANSI escape sequences for terminal syntax highlighting
+const (
+	colorReset  = "\033[0m"
+	colorKey    = "\033[36m" // Cyan for object keys
+	colorString = "\033[32m" // Green for string literals
+	colorNumber = "\033[33m" // Yellow for numeric values
+	colorBool   = "\033[35m" // Magenta for booleans
+	colorNull   = "\033[35m" // Magenta for null
+	colorPunct  = "\033[90m" // Dark Gray for structural symbols ({ } [ ] : ,)
+)
+
+// formatValue recursively renders a Value into valid JSON with optional indentation and colorization.
+func formatValue(v Value, sb *strings.Builder, indent string, depth int, colorize bool) {
+	isPretty := indent != ""
+
+	switch v.Type {
+	case TypeNull:
+		if colorize {
+			sb.WriteString(colorNull)
+		}
+		sb.WriteString("null")
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+
+	case TypeBool:
+		if colorize {
+			sb.WriteString(colorBool)
+		}
+		if v.Bol {
+			sb.WriteString("true")
+		} else {
+			sb.WriteString("false")
+		}
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+
+	case TypeNumber:
+		if colorize {
+			sb.WriteString(colorNumber)
+		}
+		sb.WriteString(strconv.FormatFloat(v.Num, 'f', -1, 64))
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+
+	case TypeString:
+		if colorize {
+			sb.WriteString(colorString)
+		}
+		sb.WriteString(escapeString(v.Str))
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+
+	case TypeArray:
+		if len(v.Arr) == 0 {
+			if colorize {
+				sb.WriteString(colorPunct)
+			}
+			sb.WriteString("[]")
+			if colorize {
+				sb.WriteString(colorReset)
+			}
+			return
+		}
+
+		if colorize {
+			sb.WriteString(colorPunct)
+		}
+		sb.WriteString("[")
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+
+		if isPretty {
+			sb.WriteString("\n")
+		}
+
+		for i := 0; i < len(v.Arr); i++ {
+			if isPretty {
+				sb.WriteString(strings.Repeat(indent, depth+1))
+			}
+
+			formatValue(v.Arr[i], sb, indent, depth+1, colorize)
+
+			if i < len(v.Arr)-1 {
+				if colorize {
+					sb.WriteString(colorPunct)
+				}
+				sb.WriteString(",")
+				if colorize {
+					sb.WriteString(colorReset)
+				}
+			}
+
+			if isPretty {
+				sb.WriteString("\n")
+			}
+		}
+
+		if isPretty {
+			sb.WriteString(strings.Repeat(indent, depth))
+		}
+
+		if colorize {
+			sb.WriteString(colorPunct)
+		}
+		sb.WriteString("]")
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+
+	case TypeObject:
+		if len(v.Obj) == 0 {
+			if colorize {
+				sb.WriteString(colorPunct)
+			}
+			sb.WriteString("{}")
+			if colorize {
+				sb.WriteString(colorReset)
+			}
+			return
+		}
+
+		if colorize {
+			sb.WriteString(colorPunct)
+		}
+		sb.WriteString("{")
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+
+		if isPretty {
+			sb.WriteString("\n")
+		}
+
+		for i := 0; i < len(v.Obj); i++ {
+			member := v.Obj[i]
+
+			if isPretty {
+				sb.WriteString(strings.Repeat(indent, depth+1))
+			}
+
+			// Key
+			if colorize {
+				sb.WriteString(colorKey)
+			}
+			sb.WriteString(escapeString(member.Key))
+			if colorize {
+				sb.WriteString(colorReset)
+			}
+
+			// Colon
+			if colorize {
+				sb.WriteString(colorPunct)
+			}
+			sb.WriteString(":")
+			if colorize {
+				sb.WriteString(colorReset)
+			}
+			if isPretty {
+				sb.WriteString(" ")
+			}
+
+			// Value
+			formatValue(member.Val, sb, indent, depth+1, colorize)
+
+			// Comma
+			if i < len(v.Obj)-1 {
+				if colorize {
+					sb.WriteString(colorPunct)
+				}
+				sb.WriteString(",")
+				if colorize {
+					sb.WriteString(colorReset)
+				}
+			}
+
+			if isPretty {
+				sb.WriteString("\n")
+			}
+		}
+
+		if isPretty {
+			sb.WriteString(strings.Repeat(indent, depth))
+		}
+
+		if colorize {
+			sb.WriteString(colorPunct)
+		}
+		sb.WriteString("}")
+		if colorize {
+			sb.WriteString(colorReset)
+		}
+	}
 }

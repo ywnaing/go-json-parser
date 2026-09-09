@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -441,4 +442,92 @@ func TestValueHelpers(t *testing.T) {
 		t.Errorf("expected GetInt() on string to return false")
 	}
 }
+
+func TestSerializationAndPrettyPrint(t *testing.T) {
+	input := `{"age":28,"name":"Tom","scores":[100,95],"verified":true}`
+	p := NewParser(input)
+	root, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	// 1. Minified String()
+	minified := root.String()
+	expectedMinified := `{"age":28,"name":"Tom","scores":[100,95],"verified":true}`
+	if minified != expectedMinified {
+		t.Errorf("expected minified %q, got %q", expectedMinified, minified)
+	}
+
+	// 2. PrettyPrint with 2 spaces
+	pretty := root.PrettyPrint("  ")
+	expectedPretty := "{\n" +
+		"  \"age\": 28,\n" +
+		"  \"name\": \"Tom\",\n" +
+		"  \"scores\": [\n" +
+		"    100,\n" +
+		"    95\n" +
+		"  ],\n" +
+		"  \"verified\": true\n" +
+		"}"
+	if pretty != expectedPretty {
+		t.Errorf("expected pretty:\n%s\ngot:\n%s", expectedPretty, pretty)
+	}
+
+	// 3. ColorPrint should not be empty and should contain ANSI codes
+	colorized := root.ColorPrint("  ")
+	if len(colorized) == 0 || !strings.Contains(colorized, "\033[") {
+		t.Errorf("expected colorized output with ANSI codes, got %q", colorized)
+	}
+
+	// 4. Empty structures
+	emptyObj, _ := NewParser(`{}`).Parse()
+	if emptyObj.String() != "{}" {
+		t.Errorf("expected '{}', got %q", emptyObj.String())
+	}
+	emptyArr, _ := NewParser(`[]`).Parse()
+	if emptyArr.String() != "[]" {
+		t.Errorf("expected '[]', got %q", emptyArr.String())
+	}
+}
+
+func TestToNative(t *testing.T) {
+	input := `{
+		"name": "Tom",
+		"age": 28,
+		"active": true,
+		"tags": ["go", "json"],
+		"meta": null
+	}`
+
+	p := NewParser(input)
+	root, err := p.Parse()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	native := root.ToNative()
+	m, ok := native.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any, got %T", native)
+	}
+
+	if m["name"] != "Tom" {
+		t.Errorf("expected name 'Tom', got %v", m["name"])
+	}
+	if m["age"] != 28.0 {
+		t.Errorf("expected age 28.0, got %v", m["age"])
+	}
+	if m["active"] != true {
+		t.Errorf("expected active true, got %v", m["active"])
+	}
+	if m["meta"] != nil {
+		t.Errorf("expected meta nil, got %v", m["meta"])
+	}
+
+	tags, ok := m["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "go" || tags[1] != "json" {
+		t.Errorf("expected tags ['go', 'json'], got %v", m["tags"])
+	}
+}
+
 
